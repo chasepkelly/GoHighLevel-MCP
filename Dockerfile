@@ -1,3 +1,21 @@
+# Multi-stage build
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
 FROM node:18-alpine
 
 WORKDIR /app
@@ -5,11 +23,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install only production dependencies
 RUN npm ci --only=production
 
-# Copy built application
-COPY dist/ ./dist/
+# Copy built application from builder
+COPY --from=builder /app/dist ./dist
 COPY .env.example ./
 
 # Create non-root user
@@ -21,5 +39,4 @@ USER ghl-mcp
 EXPOSE 8000
 
 # Default to HTTP server for cloud deployment
-# For Claude Desktop STDIO, override: docker run ... yourusername/ghl-mcp-server node dist/server.js
-CMD ["node", "dist/http-server.js"] 
+CMD ["node", "dist/http-server.js"]
