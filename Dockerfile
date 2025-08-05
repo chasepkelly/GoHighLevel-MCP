@@ -1,41 +1,25 @@
-# Multi-stage build for TypeScript compilation
-FROM node:18-alpine AS builder
+FROM node:18-alpine
 
-# Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (including dev dependencies for TypeScript)
-RUN npm ci
-
-# Copy source code
-COPY . .
-
-# Build the application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine AS production
-
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies
+# Install dependencies
 RUN npm ci --only=production
 
-# Copy built files from builder stage
-COPY --from=builder /app/dist ./dist
+# Copy built application
+COPY dist/ ./dist/
+COPY .env.example ./
 
-# Expose the port
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S ghl-mcp -u 1001 -G nodejs
+
+USER ghl-mcp
+
 EXPOSE 8000
 
-# Set environment to production
-ENV NODE_ENV=production
-
-# Start the HTTP server
-CMD ["npm", "start"] 
+# Default to HTTP server for cloud deployment
+# For Claude Desktop STDIO, override: docker run ... yourusername/ghl-mcp-server node dist/server.js
+CMD ["node", "dist/http-server.js"] 

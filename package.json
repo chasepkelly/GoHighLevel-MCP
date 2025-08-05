@@ -17,9 +17,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "nodemon --exec ts-node src/http-server.ts",
+    "dev:streamable": "nodemon --exec ts-node src/http-streamable-server.ts",
     "start": "node dist/http-server.js",
     "start:stdio": "node dist/server.js",
     "start:http": "node dist/http-server.js",
+    "start:streamable": "node dist/http-streamable-server.js",
     "vercel-build": "npm run build",
     "prepublishOnly": "npm run build",
     "test": "jest",

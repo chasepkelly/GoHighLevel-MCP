@@ -386,6 +386,200 @@ class GHLMCPHttpServer {
     this.app.get('/sse', handleSSE);
     this.app.post('/sse', handleSSE);
 
+    // HTTP Streamable endpoint for n8n MCP connection
+    this.app.post('/mcp', async (req, res) => {
+      console.log(`[GHL MCP HTTP] HTTP Streamable request: ${req.body?.method}`);
+      
+      // Handle authentication
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      
+      try {
+        const { method, params, id } = req.body;
+        
+        // Handle different MCP methods
+        switch (method) {
+          case 'initialize':
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                protocolVersion: '2024-11-05',
+                capabilities: {
+                  tools: {}
+                },
+                serverInfo: {
+                  name: 'ghl-mcp-server',
+                  version: '1.0.0'
+                }
+              },
+              id
+            });
+            break;
+            
+          case 'tools/list':
+            const allTools = await this.getAllTools();
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                tools: allTools
+              },
+              id
+            });
+            break;
+            
+          case 'tools/call':
+            const { name, arguments: args } = params;
+            console.log(`[GHL MCP HTTP] Calling tool: ${name}`);
+            
+            try {
+              const result = await this.executeTool(name, args);
+              res.json({
+                jsonrpc: '2.0',
+                result: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify(result, null, 2)
+                    }
+                  ]
+                },
+                id
+              });
+            } catch (error) {
+              res.json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: error instanceof Error ? error.message : 'Tool execution failed'
+                },
+                id
+              });
+            }
+            break;
+            
+          default:
+            res.json({
+              jsonrpc: '2.0',
+              error: {
+                code: -32601,
+                message: `Method not found: ${method}`
+              },
+              id
+            });
+        }
+      } catch (error) {
+        console.error('[GHL MCP HTTP] HTTP Streamable error:', error);
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error'
+          },
+          id: req.body?.id
+        });
+      }
+    });
+
+    // Also support trailing slash - just duplicate the handler
+    this.app.post('/mcp/', async (req, res) => {
+      console.log(`[GHL MCP HTTP] HTTP Streamable request: ${req.body?.method}`);
+      
+      // Handle authentication
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      
+      try {
+        const { method, params, id } = req.body;
+        
+        // Handle different MCP methods
+        switch (method) {
+          case 'initialize':
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                protocolVersion: '2024-11-05',
+                capabilities: {
+                  tools: {}
+                },
+                serverInfo: {
+                  name: 'ghl-mcp-server',
+                  version: '1.0.0'
+                }
+              },
+              id
+            });
+            break;
+            
+          case 'tools/list':
+            const allTools = await this.getAllTools();
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                tools: allTools
+              },
+              id
+            });
+            break;
+            
+          case 'tools/call':
+            const { name, arguments: args } = params;
+            console.log(`[GHL MCP HTTP] Calling tool: ${name}`);
+            
+            try {
+              const result = await this.executeTool(name, args);
+              res.json({
+                jsonrpc: '2.0',
+                result: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify(result, null, 2)
+                    }
+                  ]
+                },
+                id
+              });
+            } catch (error) {
+              res.json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: error instanceof Error ? error.message : 'Tool execution failed'
+                },
+                id
+              });
+            }
+            break;
+            
+          default:
+            res.json({
+              jsonrpc: '2.0',
+              error: {
+                code: -32601,
+                message: `Method not found: ${method}`
+              },
+              id
+            });
+        }
+      } catch (error) {
+        console.error('[GHL MCP HTTP] HTTP Streamable error:', error);
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error'
+          },
+          id: req.body?.id
+        });
+      }
+    });
+
     // Root endpoint with server info
     this.app.get('/', (req, res) => {
       res.json({
@@ -396,12 +590,100 @@ class GHLMCPHttpServer {
           health: '/health',
           capabilities: '/capabilities',
           tools: '/tools',
-          sse: '/sse'
+          sse: '/sse',
+          mcp: '/mcp (HTTP Streamable for n8n)'
         },
         tools: this.getToolsCount(),
         documentation: 'https://github.com/your-repo/ghl-mcp-server'
       });
     });
+  }
+
+  /**
+   * Get all tools for HTTP Streamable endpoint
+   */
+  private async getAllTools() {
+    const contactTools = this.contactTools.getToolDefinitions();
+    const conversationTools = this.conversationTools.getToolDefinitions();
+    const blogTools = this.blogTools.getToolDefinitions();
+    const opportunityTools = this.opportunityTools.getToolDefinitions();
+    const calendarTools = this.calendarTools.getToolDefinitions();
+    const emailTools = this.emailTools.getToolDefinitions();
+    const locationTools = this.locationTools.getToolDefinitions();
+    const emailISVTools = this.emailISVTools.getToolDefinitions();
+    const socialMediaTools = this.socialMediaTools.getTools();
+    const mediaTools = this.mediaTools.getToolDefinitions();
+    const objectTools = this.objectTools.getToolDefinitions();
+    const associationTools = this.associationTools.getTools();
+    const customFieldV2Tools = this.customFieldV2Tools.getTools();
+    const workflowTools = this.workflowTools.getTools();
+    const surveyTools = this.surveyTools.getTools();
+    const storeTools = this.storeTools.getTools();
+    const productsTools = this.productsTools.getTools();
+    
+    return [
+      ...contactTools,
+      ...conversationTools,
+      ...blogTools,
+      ...opportunityTools,
+      ...calendarTools,
+      ...emailTools,
+      ...locationTools,
+      ...emailISVTools,
+      ...socialMediaTools,
+      ...mediaTools,
+      ...objectTools,
+      ...associationTools,
+      ...customFieldV2Tools,
+      ...workflowTools,
+      ...surveyTools,
+      ...storeTools,
+      ...productsTools
+    ];
+  }
+
+  /**
+   * Execute a tool for HTTP Streamable endpoint
+   */
+  private async executeTool(name: string, args: any) {
+    // Route to appropriate tool handler
+    if (this.isContactTool(name)) {
+      return await this.contactTools.executeTool(name, args || {});
+    } else if (this.isConversationTool(name)) {
+      return await this.conversationTools.executeTool(name, args || {});
+    } else if (this.isBlogTool(name)) {
+      return await this.blogTools.executeTool(name, args || {});
+    } else if (this.isOpportunityTool(name)) {
+      return await this.opportunityTools.executeTool(name, args || {});
+    } else if (this.isCalendarTool(name)) {
+      return await this.calendarTools.executeTool(name, args || {});
+    } else if (this.isEmailTool(name)) {
+      return await this.emailTools.executeTool(name, args || {});
+    } else if (this.isLocationTool(name)) {
+      return await this.locationTools.executeTool(name, args || {});
+    } else if (this.isEmailISVTool(name)) {
+      return await this.emailISVTools.executeTool(name, args || {});
+    } else if (this.isSocialMediaTool(name)) {
+      return await this.socialMediaTools.executeTool(name, args || {});
+    } else if (this.isMediaTool(name)) {
+      return await this.mediaTools.executeTool(name, args || {});
+    } else if (this.isObjectTool(name)) {
+      return await this.objectTools.executeTool(name, args || {});
+    } else if (this.isAssociationTool(name)) {
+      return await this.associationTools.executeAssociationTool(name, args || {});
+    } else if (this.isCustomFieldV2Tool(name)) {
+      return await this.customFieldV2Tools.executeCustomFieldV2Tool(name, args || {});
+    } else if (this.isWorkflowTool(name)) {
+      return await this.workflowTools.executeWorkflowTool(name, args || {});
+    } else if (this.isSurveyTool(name)) {
+      return await this.surveyTools.executeSurveyTool(name, args || {});
+    } else if (this.isStoreTool(name)) {
+      return await this.storeTools.executeStoreTool(name, args || {});
+    } else if (this.isProductsTool(name)) {
+      return await this.productsTools.executeProductsTool(name, args || {});
+    } else {
+      throw new Error(`Unknown tool: ${name}`);
+    }
   }
 
   /**
