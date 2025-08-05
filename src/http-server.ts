@@ -16,6 +16,7 @@ import {
 import * as dotenv from 'dotenv';
 
 import { GHLApiClient } from './clients/ghl-api-client';
+import { ToolRouter } from './tool-router';
 import { ContactTools } from './tools/contact-tools';
 import { ConversationTools } from './tools/conversation-tools';
 import { BlogTools } from './tools/blog-tools';
@@ -62,6 +63,7 @@ class GHLMCPHttpServer {
   private surveyTools: SurveyTools;
   private storeTools: StoreTools;
   private productsTools: ProductsTools;
+  private toolRouter: ToolRouter;
   private port: number;
 
   constructor() {
@@ -105,6 +107,7 @@ class GHLMCPHttpServer {
     this.surveyTools = new SurveyTools(this.ghlClient);
     this.storeTools = new StoreTools(this.ghlClient);
     this.productsTools = new ProductsTools(this.ghlClient);
+    this.toolRouter = new ToolRouter();
 
     // Setup MCP handlers
     this.setupMCPHandlers();
@@ -580,6 +583,122 @@ class GHLMCPHttpServer {
       }
     });
 
+    // Smart MCP endpoint with dynamic tool selection for OpenAI (max 128 tools)
+    this.app.post('/mcp-smart', async (req, res) => {
+      console.log(`[GHL MCP HTTP] Smart endpoint request: ${req.body?.method}`);
+      
+      // Handle authentication
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      
+      try {
+        const { method, params, id } = req.body;
+        
+        // Handle different MCP methods
+        switch (method) {
+          case 'initialize':
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                protocolVersion: '2024-11-05',
+                capabilities: {
+                  tools: {}
+                },
+                serverInfo: {
+                  name: 'ghl-mcp-server-smart',
+                  version: '1.0.0'
+                }
+              },
+              id
+            });
+            break;
+            
+          case 'tools/list':
+            // Get all tools
+            const allTools = await this.getAllTools();
+            
+            // Extract context from params
+            const context = params?.context || {};
+            const userMessage = context.userMessage || '';
+            const previousMessages = context.previousMessages || [];
+            
+            // Use tool router to select relevant tools
+            const { tools: selectedTools, detectedIntents, toolCount } = 
+              this.toolRouter.selectTools(allTools, userMessage, previousMessages, 120);
+            
+            console.log(`[GHL MCP HTTP] Smart tool selection: ${toolCount} tools selected for intents: ${detectedIntents.join(', ')}`);
+            
+            res.json({
+              jsonrpc: '2.0',
+              result: {
+                tools: selectedTools,
+                _meta: {
+                  totalTools: allTools.length,
+                  selectedTools: toolCount,
+                  detectedIntents,
+                  info: 'Tools dynamically selected based on context'
+                }
+              },
+              id
+            });
+            break;
+            
+          case 'tools/call':
+            const { name, arguments: args } = params;
+            console.log(`[GHL MCP HTTP] Calling tool: ${name}`);
+            
+            try {
+              const result = await this.executeTool(name, args);
+              res.json({
+                jsonrpc: '2.0',
+                result: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify(result, null, 2)
+                    }
+                  ]
+                },
+                id
+              });
+            } catch (error) {
+              res.json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: error instanceof Error ? error.message : 'Tool execution failed'
+                },
+                id
+              });
+            }
+            break;
+            
+          default:
+            res.json({
+              jsonrpc: '2.0',
+              error: {
+                code: -32601,
+                message: `Method not found: ${method}`
+              },
+              id
+            });
+        }
+      } catch (error) {
+        console.error('[GHL MCP HTTP] Smart endpoint error:', error);
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error'
+          },
+          id: req.body?.id
+        });
+      }
+    });
+
     // Root endpoint with server info
     this.app.get('/', (req, res) => {
       res.json({
@@ -591,7 +710,8 @@ class GHLMCPHttpServer {
           capabilities: '/capabilities',
           tools: '/tools',
           sse: '/sse',
-          mcp: '/mcp (HTTP Streamable for n8n)'
+          mcp: '/mcp (HTTP Streamable for n8n)',
+          'mcp-smart': '/mcp-smart (Smart tool selection, max 128 tools)'
         },
         tools: this.getToolsCount(),
         documentation: 'https://github.com/your-repo/ghl-mcp-server'
